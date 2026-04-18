@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Archaic DTA Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f4f4f9; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .chart-box { border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; font-size: 12px; }
+        .meta-results { margin-top: 20px; padding: 15px; background: #eef; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Archaic Diagnostic Accuracy Simulator</h1>
+        <p>This dashboard simulates a world where only 1980s-era DTA methods exist (Moses SROC, Independent Pooling).</p>
+        
+        <div class="meta-results" id="meta-info">
+            <strong>Archaic Estimates:</strong><br>
+            Independent Pooled Sensitivity: <span id="pool-sens">0.803</span><br>
+            Independent Pooled Specificity: <span id="pool-spec">0.900</span><br>
+            Moses SROC Eq: D = 4.397 + 1.018 * S
+        </div>
+
+        <div class="grid">
+            <div class="chart-box">
+                <canvas id="srocChart"></canvas>
+            </div>
+            <div class="chart-box">
+                <canvas id="forestChart"></canvas>
+            </div>
+        </div>
+
+        <div id="data-table-container">
+            <table id="data-table">
+                <thead>
+                    <tr>
+                        <th>Study</th><th>TP</th><th>FP</th><th>FN</th><th>TN</th><th>Sens</th><th>Spec</th>
+                    </tr>
+                </thead>
+                <tbody id="data-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const data = [
+            {"study": "Study_1", "tp": 84, "fp": 38, "fn": 16, "tn": 354, "n_pos": 100, "n_neg": 392},
+            {"study": "Study_2", "tp": 83, "fp": 46, "fn": 24, "tn": 371, "n_pos": 107, "n_neg": 417},
+            {"study": "Study_3", "tp": 80, "fp": 40, "fn": 17, "tn": 335, "n_pos": 97, "n_neg": 375},
+            {"study": "Study_4", "tp": 69, "fp": 37, "fn": 18, "tn": 383, "n_pos": 87, "n_neg": 420},
+            {"study": "Study_5", "tp": 66, "fp": 43, "fn": 12, "tn": 379, "n_pos": 78, "n_neg": 422},
+            {"study": "Study_6", "tp": 75, "fp": 41, "fn": 15, "tn": 360, "n_pos": 90, "n_neg": 401},
+            {"study": "Study_7", "tp": 82, "fp": 45, "fn": 20, "tn": 340, "n_pos": 102, "n_neg": 385},
+            {"study": "Study_8", "tp": 70, "fp": 35, "fn": 14, "tn": 390, "n_pos": 84, "n_neg": 425},
+            {"study": "Study_9", "tp": 88, "fp": 50, "fn": 22, "tn": 320, "n_pos": 110, "n_neg": 370},
+            {"study": "Study_10", "tp": 72, "fp": 38, "fn": 16, "tn": 350, "n_pos": 88, "n_neg": 388}
+        ];
+
+        // Populate Table
+        const tbody = document.getElementById('data-body');
+        data.forEach(d => {
+            const sens = (d.tp / (d.tp + d.fn)).toFixed(3);
+            const spec = (d.tn / (d.tn + d.fp)).toFixed(3);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${d.study}</td><td>${d.tp}</td><td>${d.fp}</td><td>${d.fn}</td><td>${d.tn}</td><td>${sens}</td><td>${spec}</td>`;
+            tbody.appendChild(tr);
+        });
+
+        // SROC Chart
+        const srocCtx = document.getElementById('srocChart').getContext('2d');
+        const srocPoints = data.map(d => ({
+            x: 1 - (d.tn / (d.tn + d.fp)),
+            y: d.tp / (d.tp + d.fn)
+        }));
+
+        // Moses SROC Curve (Simplified)
+        // D = a + b*S => logit(sens) + logit(spec) = a + b*(logit(sens) - logit(spec))
+        // This is tricky to solve for sens = f(spec) without numerical methods if b != 0
+        // For b=1: logit(sens) + logit(spec) = a + logit(sens) - logit(spec) => 2*logit(spec) = a => spec fixed
+        // For b=0: logit(sens) + logit(spec) = a => logit(sens) = a - logit(spec)
+        const a = 4.397, b = 1.018;
+        const curvePoints = [];
+        for (let fpr = 0.01; fpr < 0.99; fpr += 0.05) {
+            const logit_spec = Math.log((1-fpr)/fpr);
+            // logit_s + logit_sp = a + b*(logit_s - logit_sp)
+            // logit_s(1 - b) = a - logit_sp(1 + b)
+            // logit_s = (a - logit_sp*(1 + b)) / (1 - b)
+            let logit_s;
+            if (Math.abs(1-b) < 0.001) {
+                // If b=1, logit_sp is fixed at a/2? Not really how it works in Moses.
+                // Moses D = a + bS is an empirical fit.
+                logit_s = a - logit_spec; // fallback to symmetric
+            } else {
+                logit_s = (a - logit_spec * (1 + b)) / (1 - b);
+            }
+            const s = 1 / (1 + Math.exp(-logit_s));
+            if (s >= 0 && s <= 1) curvePoints.push({x: fpr, y: s});
+        }
+        curvePoints.sort((p1, p2) => p1.x - p2.x);
+
+        new Chart(srocCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Studies',
+                    data: srocPoints,
+                    backgroundColor: 'rgba(54, 162, 235, 1)'
+                }, {
+                    label: 'Moses SROC Curve',
+                    data: curvePoints,
+                    type: 'line',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    fill: false,
+                    showLine: true,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                scales: {
+                    x: { title: { display: true, text: '1 - Specificity (FPR)' }, min: 0, max: 1 },
+                    y: { title: { display: true, text: 'Sensitivity (TPR)' }, min: 0, max: 1 }
+                }
+            }
+        });
+
+        // Forest Chart (Simplified Scatter for Sens/Spec)
+        const forestCtx = document.getElementById('forestChart').getContext('2d');
+        new Chart(forestCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Sensitivity',
+                    data: data.map((d, i) => ({x: d.tp/(d.tp+d.fn), y: i})),
+                    backgroundColor: 'green'
+                }, {
+                    label: 'Specificity',
+                    data: data.map((d, i) => ({x: d.tn/(d.tn+d.fp), y: i})),
+                    backgroundColor: 'orange'
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                scales: {
+                    x: { title: { display: true, text: 'Value' }, min: 0, max: 1 },
+                    y: { ticks: { callback: (val) => data[val]?.study } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

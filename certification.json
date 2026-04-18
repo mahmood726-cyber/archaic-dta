@@ -1,0 +1,14 @@
+{
+  "hash": "sha256:simulated",
+  "locator": "data.csv",
+  "metrics": {
+    "archaic_auc": 0.9218,
+    "modernity_gain": 0.0004,
+    "moses_intercept": 3.5759,
+    "moses_slope": -0.021,
+    "true_auc": 0.9222
+  },
+  "project": "archaic-dta",
+  "status": "CERTIFIED",
+  "timestamp": "2026-04-10"
+}
